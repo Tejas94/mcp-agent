@@ -14,16 +14,17 @@ import { existsSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-const PROJECT = "Project 3: issue-triage agent with MCP and guardrails (weeks 7-9)";
+const PROJECT = "Project 3: GitHub triage and review agent with MCP, approvals and evals (weeks 7-9)";
 const SCAN_DIRS = ["src", "evals"];
 /** In the suggested order. `spec` is the test file that checks it, if any. */
 const TODOS = [
-  { id: "P3-01", week: 7, what: "MCP tools: get_issue, add_labels, add_comment, close_issue", spec: "mcp-tools.test.ts" },
-  { id: "P3-03", week: 7, what: "Guardrails: allow, confirm or deny each tool call", spec: "guardrails.test.ts" },
-  { id: "P3-02", week: 7, what: "The agent loop and its system prompt", check: "npm run agent, then read the trace" },
-  { id: "P3-04", week: 9, what: "Code-based eval checks", spec: "checks.test.ts" },
+  { id: "P3-01", week: 7, what: "MCP tools: issues, code, pull requests and the write actions", spec: "mcp-tools.test.ts" },
+  { id: "P3-02", week: 7, what: "Guardrails: allow, confirm or deny each tool call", spec: "guardrails.test.ts" },
+  { id: "P3-03", week: 7, what: "The agent loop and its system prompt", check: "npm run agent on the fixture, then read the trace" },
+  { id: "P3-04", week: 8, what: "Safe tool results: size cap, untrusted-content tags, clean errors", spec: "tool-output.test.ts" },
+  { id: "P3-05", week: 9, what: "Code-based eval checks", spec: "checks.test.ts" },
   { id: "P3-06", week: 9, what: "More scenarios, from failures in your traces", check: "npm run eval" },
-  { id: "P3-05", week: 8, what: "Stretch: send traces to Langfuse or LangSmith", check: "a run shows up in the tracing UI" },
+  { id: "P3-07", week: 8, what: "Stretch: send traces to Langfuse or LangSmith", check: "the run shows in the tracing UI" },
 ];
 
 function walk(dir) {
