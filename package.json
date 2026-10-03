@@ -1,0 +1,34 @@
+{
+  "name": "mcp-agent",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "mcp": "tsx src/mcp/server.ts",
+    "mcp:inspect": "npx @modelcontextprotocol/inspector tsx src/mcp/server.ts",
+    "agent": "tsx --env-file-if-exists=.env src/cli.ts",
+    "reset": "tsx src/tracker/reset.ts",
+    "eval": "tsx --env-file-if-exists=.env evals/run.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:core": "vitest run tests/core",
+    "test:specs": "vitest run tests/specs",
+    "test:watch": "vitest",
+    "todos": "grep -rn \"TODO(P3-\" src evals | sort",
+    "progress": "node scripts/progress.mjs"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.131.0",
+    "@modelcontextprotocol/sdk": "^1.32.0",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.4",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.3"
+  }
+}
