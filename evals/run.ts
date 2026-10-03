@@ -1,74 +1,77 @@
-import { copyFileSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import path from "node:path";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { DEFAULT_POLICY } from "../src/agent/guardrails.js";
 import { MODEL, runAgent, type AgentResult } from "../src/agent/loop.js";
-import { connectIssueTracker } from "../src/agent/mcp-client.js";
+import { connectGitHubServer, todoNotices } from "../src/agent/mcp-client.js";
 import { Tracer } from "../src/agent/trace.js";
-import { SEED_FILE, type Issue } from "../src/tracker/store.js";
-import type { CheckResult } from "./checks.js";
+import { readState } from "../src/github/fixture.js";
+import {
+  formatScenario,
+  formatSummary,
+  freshSandbox,
+  parseArgs,
+  reportFor,
+  runChecks,
+  scenarioEnv,
+  selectScenarios,
+  summarize,
+  type ScenarioReport,
+} from "./harness.js";
 import { scenarios } from "./scenarios.js";
 
 /**
- * Runs every scenario against a fresh copy of the seed issues and the real model.
- * Exits non-zero when the pass rate drops below EVAL_MIN_PASS (default 0.9), which
- * is what makes CI fail when a prompt change breaks something.
+ * Runs the scenarios against the real model, each on a fresh copy of the tiny-shop
+ * sandbox with its own MCP server. Exits 1 when the pass rate is below EVAL_MIN_PASS
+ * (default 0.9), which is what makes CI fail when a change breaks something.
  *
- *   npm run eval                 all scenarios
- *   npm run eval -- injection    only scenarios whose name contains "injection"
+ *   npm run eval                       every scenario once
+ *   npm run eval -- injection          only scenarios whose name contains "injection"
+ *   npm run eval -- --repeat 3         every scenario three times (the week 9 noise check)
  */
 const minPass = Number(process.env.EVAL_MIN_PASS ?? 0.9);
-const filter = process.argv[2];
+const { filter, repeat } = parseArgs(process.argv.slice(2));
+const reports: ScenarioReport[] = [];
+let notified = false;
 
-const readIssues = (file: string) => JSON.parse(readFileSync(file, "utf8")) as Issue[];
-
-let passed = 0;
-let total = 0;
-const report: { scenario: string; checks: CheckResult[]; trace: string | null }[] = [];
-
-for (const s of scenarios.filter((x) => !filter || x.name.includes(filter))) {
-  const file = path.join(mkdtempSync(path.join(tmpdir(), "triage-")), "issues.json");
-  copyFileSync(SEED_FILE, file);
-  const before = readIssues(file);
-  const mcp = await connectIssueTracker({ TRACKER_FILE: file });
-  const tracer = new Tracer("traces/evals");
-  tracer.log({ type: "run_start", task: s.task, model: MODEL });
-
-  let result: AgentResult;
-  try {
-    result = await runAgent({
-      task: s.task,
-      mcp,
-      policy: DEFAULT_POLICY,
-      tracer,
-      confirm: async () => s.confirm === "approve",
-    });
-  } catch (err) {
-    result = { finalText: String(err), steps: 0, reason: "error" };
-  } finally {
-    await mcp.close();
-  }
-  tracer.log({ type: "run_end", steps: result.steps, finalText: result.finalText, reason: result.reason });
-
-  const ctx = { before, after: readIssues(file), events: tracer.events, result };
-  const checks = s.checks.map((check) => {
-    try {
-      return check(ctx);
-    } catch (err) {
-      return { name: "check crashed", pass: false, detail: err instanceof Error ? err.message : String(err) };
+for (const s of selectScenarios(scenarios, filter)) {
+  for (let run = 1; run <= repeat; run++) {
+    const { stateFile, before } = freshSandbox();
+    const tracer = new Tracer("traces/evals");
+    tracer.log({ type: "run_start", task: s.task, model: MODEL, backend: "fixture" });
+    const mcp = await connectGitHubServer(scenarioEnv(s, stateFile));
+    if (!notified) {
+      for (const notice of todoNotices(mcp.serverLog())) console.error(`MCP server: ${notice}`);
+      notified = true;
     }
-  });
 
-  console.log(`\n${s.name}`);
-  for (const c of checks) {
-    total++;
-    if (c.pass) passed++;
-    console.log(`  ${c.pass ? "PASS" : "FAIL"}  ${c.name}${c.detail && !c.pass ? `  (${c.detail})` : ""}`);
+    let result: AgentResult;
+    try {
+      result = await runAgent({
+        task: s.task,
+        mcp,
+        policy: DEFAULT_POLICY,
+        tracer,
+        confirm: async () => s.confirm === "approve",
+      });
+    } catch (err) {
+      result = { finalText: err instanceof Error ? err.message : String(err), steps: 0, reason: "error" };
+    } finally {
+      await mcp.close();
+    }
+    tracer.log({ type: "run_end", steps: result.steps, finalText: result.finalText, reason: result.reason });
+    await tracer.flush();
+
+    const ctx = { before, after: readState(stateFile), events: tracer.events, result };
+    const report = reportFor(s, run, ctx, runChecks(s.checks, ctx), MODEL, tracer.file);
+    reports.push(report);
+    console.log(`\n${formatScenario(report, repeat)}`);
+    if (result.reason === "error") console.log(`  error: ${result.finalText}`);
   }
-  report.push({ scenario: s.name, checks, trace: tracer.file });
 }
 
-const rate = total ? passed / total : 0;
-console.log(`\n${passed}/${total} checks passed (${(rate * 100).toFixed(0)}%), threshold ${minPass * 100}% · model ${MODEL}`);
-writeFileSync(`evals/results-${Date.now()}.json`, JSON.stringify({ model: MODEL, passed, total, report }, null, 2));
-process.exitCode = rate >= minPass ? 0 : 1;
+const summary = summarize(reports);
+console.log(`\n${formatSummary(summary, MODEL, minPass)}`);
+mkdirSync("evals", { recursive: true });
+const out = `evals/results-${new Date().toISOString().replace(/[:.]/g, "-")}.json`;
+writeFileSync(out, JSON.stringify({ model: MODEL, minPass, repeat, summary, reports }, null, 2));
+console.log(`\nResults: ${out}`);
+process.exitCode = summary.rate >= minPass ? 0 : 1;

@@ -2,15 +2,18 @@
   "name": "mcp-agent",
   "version": "0.1.0",
   "private": true,
+  "description": "An MCP-based GitHub triage and review agent with approvals, guardrails, traces and repeatable evals.",
   "type": "module",
   "engines": {
     "node": ">=22"
   },
   "scripts": {
-    "mcp": "tsx src/mcp/server.ts",
-    "mcp:inspect": "npx @modelcontextprotocol/inspector tsx src/mcp/server.ts",
+    "mcp": "tsx --env-file-if-exists=.env src/mcp/server.ts",
+    "mcp:inspect": "npx @modelcontextprotocol/inspector -- tsx --env-file-if-exists=.env src/mcp/server.ts",
     "agent": "tsx --env-file-if-exists=.env src/cli.ts",
-    "reset": "tsx src/tracker/reset.ts",
+    "trace": "tsx src/agent/show-trace.ts",
+    "reset": "tsx --env-file-if-exists=.env src/github/reset.ts",
+    "sandbox:export": "tsx src/github/export-sandbox.ts",
     "eval": "tsx --env-file-if-exists=.env evals/run.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
