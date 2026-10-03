@@ -1,0 +1,74 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  checks:
+    # Required: typecheck and the tests for finished code.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run test:core
+
+  progress:
+    # Informational: runs the TODO specs (red until you finish them) and writes a
+    # progress table to the run summary. It never fails the build.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: node scripts/progress.mjs --specs >> "$GITHUB_STEP_SUMMARY"
+
+  evals:
+    # Runs the agent against the real model, so it costs money and needs the secret.
+    # Add ANTHROPIC_API_KEY under Settings > Secrets and variables > Actions once the
+    # agent runs end to end (week 9); until then the job skips itself.
+    # A repository variable ANTHROPIC_MODEL (same page, Variables tab) picks a cheaper model.
+    needs: checks
+    runs-on: ubuntu-latest
+    env:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      ANTHROPIC_MODEL: ${{ vars.ANTHROPIC_MODEL || 'claude-opus-5-5' }}
+      EVAL_MIN_PASS: "0.9"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - name: Skip when the secret is missing
+        if: ${{ env.ANTHROPIC_API_KEY == '' }}
+        run: echo "ANTHROPIC_API_KEY not set; skipping evals" | tee -a "$GITHUB_STEP_SUMMARY"
+      - if: ${{ env.ANTHROPIC_API_KEY != '' }}
+        run: npm ci
+      - name: Run evals
+        if: ${{ env.ANTHROPIC_API_KEY != '' }}
+        # Prints PASS/FAIL per check, copies the output to the run summary, and fails
+        # the job when the pass rate is below EVAL_MIN_PASS.
+        run: |
+          set +e
+          npm run eval > eval-output.txt 2>&1
+          status=$?
+          cat eval-output.txt
+          { echo "## Evals"; echo; echo '```'; cat eval-output.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          exit $status
+      - if: ${{ always() && env.ANTHROPIC_API_KEY != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-traces
+          path: |
+            traces/evals
+            evals/results-*.json
